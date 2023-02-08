@@ -227,8 +227,8 @@ async fn main() -> Result<()> {
 
                 // TODO only Contents-all.gz seems to be on main mirror, try others?
                 let url = format!(
-                    "http://deb.debian.org/debian/dists/bullseye/{}/binary-{}/Packages.gz",
-                    component, arch,
+                    "http://deb.debian.org/debian/dists/{}/{}/binary-{}/Packages.gz",
+                    dist, component, arch,
                 );
                 mb.println(format!("downloading {}", url))?;
 
