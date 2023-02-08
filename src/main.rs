@@ -232,7 +232,13 @@ async fn main() -> Result<()> {
                 );
                 mb.println(format!("downloading {}", url))?;
 
-                let packages_compressed = client.get(url).send().await?;
+                let packages_compressed = client.get(&url).send().await?;
+
+                if packages_compressed.status() != reqwest::StatusCode::OK {
+                    // TODO try xz instead
+                    mb.println(format!("{} returned {}", url, packages_compressed.status()))?;
+                    continue;
+                }
 
                 let packages_text = decode_reader(packages_compressed.bytes().await?.to_vec())?;
 
