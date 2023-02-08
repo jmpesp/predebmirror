@@ -65,17 +65,24 @@ async fn conditional_download(
     version: &str,
     url: &str,
     sha256: &str,
+    bytes: u64,
     path: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if Path::new(&path).exists() {
-        pb.set_style(ProgressStyle::default_bar().template("{msg}")?);
-        pb.set_message(format!("checking SHA256 for {}", path));
+        let meta = std::fs::metadata(&path)?;
 
-        if !compare_file_hash(&path, &sha256)? {
-            pb.set_message(format!("bad SHA256 for {}, re-download", path));
+        if meta.len() != bytes {
             download_file(&pb, &client, &name, &version, &url, &path).await?;
         } else {
-            pb.set_message(format!("ok SHA256 for {}", path));
+            pb.set_style(ProgressStyle::default_bar().template("{msg}")?);
+            pb.set_message(format!("checking SHA256 for {}", path));
+
+            if !compare_file_hash(&path, &sha256)? {
+                pb.set_message(format!("bad SHA256 for {}, re-download", path));
+                download_file(&pb, &client, &name, &version, &url, &path).await?;
+            } else {
+                pb.set_message(format!("ok SHA256 for {}", path));
+            }
         }
     } else {
         std::fs::create_dir_all(Path::new(&path).parent().unwrap())?;
@@ -99,6 +106,7 @@ pub struct Package {
     pub version: String,
     pub filename: String,
     pub sha256: String,
+    pub size: u64,
 }
 
 impl Package {
@@ -108,6 +116,7 @@ impl Package {
             version: "".to_string(),
             sha256: "".to_string(),
             filename: "".to_string(),
+            size: 0,
         }
     }
 }
@@ -156,6 +165,7 @@ async fn main() -> Result<()> {
                     &package.version,
                     &url,
                     &package.sha256,
+                    package.size,
                     &package.filename,
                 )
                 .await
@@ -256,6 +266,10 @@ async fn main() -> Result<()> {
 
                     if line.starts_with("SHA256: ") {
                         package.sha256 = line.split(": ").collect::<Vec<_>>()[1].to_string();
+                    }
+
+                    if line.starts_with("Size: ") {
+                        package.size = line.split(": ").collect::<Vec<_>>()[1].parse()?;
                     }
                 }
             }
