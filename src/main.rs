@@ -238,7 +238,7 @@ async fn main() -> Result<()> {
 
                         s
                     } else {
-                        // TODO try xz instead
+                        // try xz instead
                         mb.println(format!("{} returned {}", url, packages_compressed.status()))?;
 
                         let url = format!(
