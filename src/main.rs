@@ -1,19 +1,24 @@
-
+use anyhow::Result;
+use flate2::read::GzDecoder;
+use futures_util::StreamExt;
+use indicatif::{ProgressBar, ProgressStyle};
 use std::cmp::min;
+use std::collections::HashMap;
 use std::fs::File;
-use std::path::Path;
 use std::io;
 use std::io::Read;
 use std::io::Write;
-use indicatif::{ProgressBar, ProgressStyle};
-use futures_util::StreamExt;
-use anyhow::Result;
-use std::collections::HashMap;
-use flate2::read::GzDecoder;
+use std::path::Path;
 use tokio::sync::mpsc;
 
 // https://gist.github.com/giuliano-oliveira/4d11d6b3bb003dba3a1b53f43d81b30d
-async fn download_file(client: &reqwest::Client, name: &str, version: &str, url: &str, path: &str) -> Result<(), String> {
+async fn download_file(
+    client: &reqwest::Client,
+    name: &str,
+    version: &str,
+    url: &str,
+    path: &str,
+) -> Result<(), String> {
     let res = client
         .get(url)
         .send()
@@ -52,16 +57,21 @@ fn compare_file_hash(path: &str, digest: &str) -> Result<bool, Box<dyn std::erro
     Ok(result.to_lowercase() == digest.to_lowercase())
 }
 
-async fn conditional_download(client: &reqwest::Client, name: &str, version: &str, url: &str, sha256: &str, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+async fn conditional_download(
+    client: &reqwest::Client,
+    name: &str,
+    version: &str,
+    url: &str,
+    sha256: &str,
+    path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     if Path::new(&path).exists() {
         if !compare_file_hash(&path, &sha256)? {
             eprintln!("bad sha256 for {}, re-download", path);
             download_file(&client, &name, &version, &url, &path).await?;
         }
     } else {
-        std::fs::create_dir_all(
-            Path::new(&path).parent().unwrap()
-        )?;
+        std::fs::create_dir_all(Path::new(&path).parent().unwrap())?;
         download_file(&client, &name, &version, &url, &path).await?;
     }
 
@@ -70,10 +80,10 @@ async fn conditional_download(client: &reqwest::Client, name: &str, version: &st
 
 // https://docs.rs/flate2/latest/flate2/read/struct.GzDecoder.html
 fn decode_reader(bytes: Vec<u8>) -> io::Result<String> {
-   let mut gz = GzDecoder::new(&bytes[..]);
-   let mut s = String::new();
-   gz.read_to_string(&mut s)?;
-   Ok(s)
+    let mut gz = GzDecoder::new(&bytes[..]);
+    let mut s = String::new();
+    gz.read_to_string(&mut s)?;
+    Ok(s)
 }
 
 #[derive(Clone, Debug)]
@@ -118,7 +128,7 @@ async fn main() -> Result<()> {
     ];
 
     let mut mirror_tasks = Vec::with_capacity(mirror_list.len());
-    let mut mirror_channel_list: Vec<mpsc::Sender::<Package>> = Vec::with_capacity(mirror_list.len());
+    let mut mirror_channel_list: Vec<mpsc::Sender<Package>> = Vec::with_capacity(mirror_list.len());
 
     // Spawn a channel for each mirror
     for mirror in mirror_list {
@@ -139,7 +149,9 @@ async fn main() -> Result<()> {
                     &url,
                     &package.sha256,
                     &package.filename,
-                ).await {
+                )
+                .await
+                {
                     eprintln!("downloading {} failed: {}", package.name, e);
                 }
             }
@@ -162,7 +174,11 @@ async fn main() -> Result<()> {
         // TODO: store Release so it can be put into our mirror, but only after
         // all packages are downloaded. this isn't necessary if this tool is run
         // before the real debmirror.
-        let release = client.get(format!("http://deb.debian.org/debian/dists/{}/Release", dist))
+        let release = client
+            .get(format!(
+                "http://deb.debian.org/debian/dists/{}/Release",
+                dist
+            ))
             .send()
             .await?
             .text()
@@ -179,7 +195,8 @@ async fn main() -> Result<()> {
                 let columns: Vec<&str> = line.split(" ").filter(|x| x.len() > 0).collect();
                 if columns.len() == 3 {
                     // println!("{:?}", columns);
-                    let previous = file_name_to_sha256.insert(columns[2].to_string(), columns[0].to_string());
+                    let previous =
+                        file_name_to_sha256.insert(columns[2].to_string(), columns[0].to_string());
                     assert!(previous.is_none());
                 }
             } else {
@@ -198,10 +215,11 @@ async fn main() -> Result<()> {
                 // all packages are downloaded
 
                 // TODO only Contents-all.gz seems to be on main mirror, try others?
-                let packages_compressed = client.get(
-                        format!("http://deb.debian.org/debian/dists/bullseye/{}/binary-{}/Packages.gz",
-                                component, arch)
-                    )
+                let packages_compressed = client
+                    .get(format!(
+                        "http://deb.debian.org/debian/dists/bullseye/{}/binary-{}/Packages.gz",
+                        component, arch
+                    ))
                     .send()
                     .await?;
 
@@ -214,7 +232,9 @@ async fn main() -> Result<()> {
                         // new package starting
                         if package.sha256.len() == 64 {
                             // TODO send to mirror download task
-                            mirror_channel_list[mirror_channel_index].send(package).await?;
+                            mirror_channel_list[mirror_channel_index]
+                                .send(package)
+                                .await?;
                             mirror_channel_index += 1;
                             if mirror_channel_index >= mirror_channel_list.len() {
                                 mirror_channel_index = 0;
