@@ -259,8 +259,10 @@ async fn main() -> Result<()> {
 
                             s
                         } else {
-                            mb.println(format!("failed to find Packages for {} {} {}",
-                            dist, component, arch))?;
+                            mb.println(format!(
+                                "failed to find Packages for {} {} {}",
+                                dist, component, arch
+                            ))?;
                             continue;
                         }
                     }
