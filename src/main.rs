@@ -30,11 +30,11 @@ async fn download_file(
         .ok_or(format!("Failed to get content length from '{}'", &url))?;
 
     pb.set_style(ProgressStyle::default_bar()
-        .template("{msg}\n{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})").map_err(|e| e.to_string())?
+        .template("{msg} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})").map_err(|e| e.to_string())?
         .progress_chars("#>-"));
 
     pb.set_length(total_size);
-    pb.set_message(format!("Downloading {} ({}) from {}", name, version, url));
+    pb.set_message(format!("{} ({})", name, version));
 
     let mut file = File::create(path).or(Err(format!("Failed to create file '{}'", path)))?;
     let mut downloaded: u64 = 0;
@@ -49,7 +49,6 @@ async fn download_file(
         pb.set_position(new);
     }
 
-    pb.set_message(format!("Downloaded {} to {}", url, path));
     return Ok(());
 }
 
@@ -199,7 +198,6 @@ async fn main() -> Result<()> {
             if line.starts_with(" ") && sha256_rows {
                 let columns: Vec<&str> = line.split(" ").filter(|x| x.len() > 0).collect();
                 if columns.len() == 3 {
-                    // println!("{:?}", columns);
                     let previous =
                         file_name_to_sha256.insert(columns[2].to_string(), columns[0].to_string());
                     assert!(previous.is_none());
@@ -209,8 +207,6 @@ async fn main() -> Result<()> {
                 sha256_rows = line.starts_with("SHA256");
             }
         }
-
-        // println!("{} entries", file_name_to_sha256.keys().len());
 
         let mut mirror_channel_index = 0;
 
