@@ -1,7 +1,7 @@
 use anyhow::Result;
 use flate2::read::GzDecoder;
 use futures_util::StreamExt;
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::cmp::min;
 use std::collections::HashMap;
 use std::fs::File;
@@ -13,6 +13,7 @@ use tokio::sync::mpsc;
 
 // https://gist.github.com/giuliano-oliveira/4d11d6b3bb003dba3a1b53f43d81b30d
 async fn download_file(
+    pb: &ProgressBar,
     client: &reqwest::Client,
     name: &str,
     version: &str,
@@ -28,10 +29,6 @@ async fn download_file(
         .content_length()
         .ok_or(format!("Failed to get content length from '{}'", &url))?;
 
-    let pb = ProgressBar::new(total_size);
-    pb.set_style(ProgressStyle::default_bar()
-        .template("{msg}\n{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
-        .progress_chars("#>-"));
     pb.set_message(format!("Downloading {} ({}) from {}", name, version, url));
 
     let mut file = File::create(path).or(Err(format!("Failed to create file '{}'", path)))?;
@@ -58,6 +55,7 @@ fn compare_file_hash(path: &str, digest: &str) -> Result<bool, Box<dyn std::erro
 }
 
 async fn conditional_download(
+    pb: &ProgressBar,
     client: &reqwest::Client,
     name: &str,
     version: &str,
@@ -66,13 +64,18 @@ async fn conditional_download(
     path: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if Path::new(&path).exists() {
+        pb.set_length(0);
+        pb.set_message(format!("checking SHA256 for {}", path));
+
         if !compare_file_hash(&path, &sha256)? {
-            eprintln!("bad sha256 for {}, re-download", path);
-            download_file(&client, &name, &version, &url, &path).await?;
+            pb.set_message(format!("bad SHA256 for {}, re-download", path));
+            download_file(&pb, &client, &name, &version, &url, &path).await?;
+        } else {
+            pb.set_message(format!("ok SHA256 for {}", path));
         }
     } else {
         std::fs::create_dir_all(Path::new(&path).parent().unwrap())?;
-        download_file(&client, &name, &version, &url, &path).await?;
+        download_file(&pb, &client, &name, &version, &url, &path).await?;
     }
 
     Ok(())
@@ -105,17 +108,14 @@ impl Package {
     }
 }
 
-#[tokio::main]
+// Number of threads == number of mirrors
+#[tokio::main(worker_threads = 6)]
 async fn main() -> Result<()> {
     let dur = std::time::Duration::from_secs(60);
     let client = reqwest::ClientBuilder::new()
         .connect_timeout(dur)
         .timeout(dur)
         .build()?;
-
-    // http://deb.debian.org/debian/dists/bullseye/Release
-    // http://deb.debian.org/debian/dists/bullseye/Release.gpg
-    // http://deb.debian.org/debian/dists/bullseye/InRelease
 
     let mirror_list = vec![
         // Canada mirrors
@@ -129,6 +129,7 @@ async fn main() -> Result<()> {
 
     let mut mirror_tasks = Vec::with_capacity(mirror_list.len());
     let mut mirror_channel_list: Vec<mpsc::Sender<Package>> = Vec::with_capacity(mirror_list.len());
+    let mb = MultiProgress::new();
 
     // Spawn a channel for each mirror
     for mirror in mirror_list {
@@ -139,10 +140,16 @@ async fn main() -> Result<()> {
             .timeout(dur)
             .build()?;
 
+        let pb = mb.add(ProgressBar::new(0));
+        pb.set_style(ProgressStyle::default_bar()
+            .template("{msg}\n{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")?
+            .progress_chars("#>-"));
+
         let handle = tokio::spawn(async move {
             while let Some(package) = rx.recv().await {
                 let url = format!("{}/{}", mirror, package.filename);
                 if let Err(e) = conditional_download(
+                    &pb,
                     &client,
                     &package.name,
                     &package.version,
@@ -155,6 +162,7 @@ async fn main() -> Result<()> {
                     eprintln!("downloading {} failed: {}", package.name, e);
                 }
             }
+            pb.finish_with_message(format!("mirror {} done", mirror));
         });
 
         mirror_tasks.push(handle);
@@ -174,11 +182,11 @@ async fn main() -> Result<()> {
         // TODO: store Release so it can be put into our mirror, but only after
         // all packages are downloaded. this isn't necessary if this tool is run
         // before the real debmirror.
+        let url = format!("http://deb.debian.org/debian/dists/{}/Release", dist);
+        mb.println(format!("downloading {}", url))?;
+
         let release = client
-            .get(format!(
-                "http://deb.debian.org/debian/dists/{}/Release",
-                dist
-            ))
+            .get(url)
             .send()
             .await?
             .text()
@@ -215,11 +223,14 @@ async fn main() -> Result<()> {
                 // all packages are downloaded
 
                 // TODO only Contents-all.gz seems to be on main mirror, try others?
+                let url = format!(
+                    "http://deb.debian.org/debian/dists/bullseye/{}/binary-{}/Packages.gz",
+                    component, arch,
+                );
+                mb.println(format!("downloading {}", url))?;
+
                 let packages_compressed = client
-                    .get(format!(
-                        "http://deb.debian.org/debian/dists/bullseye/{}/binary-{}/Packages.gz",
-                        component, arch
-                    ))
+                    .get(url)
                     .send()
                     .await?;
 
@@ -231,10 +242,10 @@ async fn main() -> Result<()> {
                     if line.starts_with("Package: ") {
                         // new package starting
                         if package.sha256.len() == 64 {
-                            // TODO send to mirror download task
                             mirror_channel_list[mirror_channel_index]
                                 .send(package)
                                 .await?;
+
                             mirror_channel_index += 1;
                             if mirror_channel_index >= mirror_channel_list.len() {
                                 mirror_channel_index = 0;
@@ -265,6 +276,8 @@ async fn main() -> Result<()> {
     for mirror_channel in mirror_channel_list {
         drop(mirror_channel);
     }
+
+    mb.println("waiting until all tasks are done")?;
 
     // wait until tasks are done
     for task in mirror_tasks {
