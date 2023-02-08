@@ -1,0 +1,16 @@
+[package]
+name = "rust-debmirror"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1"
+reqwest = { version = "0.11", features = ["stream"] }
+tokio = { version = "1.25", features = ["full"] }
+indicatif = "0.16.2"
+futures-util = "0.3.19"
+sha256 = "1.1.1"
+xz = "0.1.0"
+flate2 = "1.0"
