@@ -5,11 +5,11 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::cmp::min;
 use std::collections::HashMap;
 use std::fs::File;
-use std::io;
 use std::io::Read;
 use std::io::Write;
 use std::path::Path;
 use tokio::sync::mpsc;
+use xz::read::XzDecoder;
 
 // https://gist.github.com/giuliano-oliveira/4d11d6b3bb003dba3a1b53f43d81b30d
 async fn download_file(
@@ -90,14 +90,6 @@ async fn conditional_download(
     }
 
     Ok(())
-}
-
-// https://docs.rs/flate2/latest/flate2/read/struct.GzDecoder.html
-fn decode_reader(bytes: Vec<u8>) -> io::Result<String> {
-    let mut gz = GzDecoder::new(&bytes[..]);
-    let mut s = String::new();
-    gz.read_to_string(&mut s)?;
-    Ok(s)
 }
 
 #[derive(Clone, Debug)]
@@ -222,25 +214,57 @@ async fn main() -> Result<()> {
 
         for component in vec!["main", "contrib", "non-free", "main/debian-installer"] {
             for arch in vec!["amd64", "i386"] {
+                // TODO only Contents-all.gz seems to be on main mirror, try others?
+
                 // TODO: store this so it can be put into our mirror, but only after
                 // all packages are downloaded
+                let packages_text = {
+                    // try Packages.gz first
+                    let url = format!(
+                        "http://deb.debian.org/debian/dists/{}/{}/binary-{}/Packages.gz",
+                        dist, component, arch,
+                    );
+                    mb.println(format!("downloading {}", url))?;
 
-                // TODO only Contents-all.gz seems to be on main mirror, try others?
-                let url = format!(
-                    "http://deb.debian.org/debian/dists/{}/{}/binary-{}/Packages.gz",
-                    dist, component, arch,
-                );
-                mb.println(format!("downloading {}", url))?;
+                    let packages_compressed = client.get(&url).send().await?;
 
-                let packages_compressed = client.get(&url).send().await?;
+                    if packages_compressed.status() == reqwest::StatusCode::OK {
+                        // https://docs.rs/flate2/latest/flate2/read/struct.GzDecoder.html
+                        let bytes = packages_compressed.bytes().await?.to_vec();
 
-                if packages_compressed.status() != reqwest::StatusCode::OK {
-                    // TODO try xz instead
-                    mb.println(format!("{} returned {}", url, packages_compressed.status()))?;
-                    continue;
-                }
+                        let mut gz = GzDecoder::new(&bytes[..]);
+                        let mut s = String::new();
+                        gz.read_to_string(&mut s)?;
 
-                let packages_text = decode_reader(packages_compressed.bytes().await?.to_vec())?;
+                        s
+                    } else {
+                        // TODO try xz instead
+                        mb.println(format!("{} returned {}", url, packages_compressed.status()))?;
+
+                        let url = format!(
+                            "http://deb.debian.org/debian/dists/{}/{}/binary-{}/Packages.xz",
+                            dist, component, arch,
+                        );
+                        mb.println(format!("downloading {}", url))?;
+
+                        let packages_compressed = client.get(&url).send().await?;
+
+                        if packages_compressed.status() == reqwest::StatusCode::OK {
+                            // https://docs.rs/xz/latest/xz/
+                            let bytes = packages_compressed.bytes().await?.to_vec();
+
+                            let mut decompressor = XzDecoder::new(&bytes[..]);
+                            let mut s = String::new();
+                            decompressor.read_to_string(&mut s)?;
+
+                            s
+                        } else {
+                            mb.println(format!("failed to find Packages for {} {} {}",
+                            dist, component, arch))?;
+                            continue;
+                        }
+                    }
+                };
 
                 let mut package = Package::new();
 
