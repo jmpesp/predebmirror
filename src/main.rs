@@ -29,6 +29,11 @@ async fn download_file(
         .content_length()
         .ok_or(format!("Failed to get content length from '{}'", &url))?;
 
+    pb.set_style(ProgressStyle::default_bar()
+        .template("{msg}\n{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})").map_err(|e| e.to_string())?
+        .progress_chars("#>-"));
+
+    pb.set_length(total_size);
     pb.set_message(format!("Downloading {} ({}) from {}", name, version, url));
 
     let mut file = File::create(path).or(Err(format!("Failed to create file '{}'", path)))?;
@@ -44,7 +49,7 @@ async fn download_file(
         pb.set_position(new);
     }
 
-    pb.finish_with_message(format!("Downloaded {} to {}", url, path));
+    pb.set_message(format!("Downloaded {} to {}", url, path));
     return Ok(());
 }
 
@@ -64,7 +69,7 @@ async fn conditional_download(
     path: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if Path::new(&path).exists() {
-        pb.set_length(0);
+        pb.set_style(ProgressStyle::default_bar().template("{msg}")?);
         pb.set_message(format!("checking SHA256 for {}", path));
 
         if !compare_file_hash(&path, &sha256)? {
@@ -141,9 +146,6 @@ async fn main() -> Result<()> {
             .build()?;
 
         let pb = mb.add(ProgressBar::new(0));
-        pb.set_style(ProgressStyle::default_bar()
-            .template("{msg}\n{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")?
-            .progress_chars("#>-"));
 
         let handle = tokio::spawn(async move {
             while let Some(package) = rx.recv().await {
@@ -185,12 +187,7 @@ async fn main() -> Result<()> {
         let url = format!("http://deb.debian.org/debian/dists/{}/Release", dist);
         mb.println(format!("downloading {}", url))?;
 
-        let release = client
-            .get(url)
-            .send()
-            .await?
-            .text()
-            .await?;
+        let release = client.get(url).send().await?.text().await?;
 
         // TODO verify http://deb.debian.org/debian/dists/bullseye/Release.gpg.
         // this isn't necessary if this tool is run before the real debmirror.
@@ -229,10 +226,7 @@ async fn main() -> Result<()> {
                 );
                 mb.println(format!("downloading {}", url))?;
 
-                let packages_compressed = client
-                    .get(url)
-                    .send()
-                    .await?;
+                let packages_compressed = client.get(url).send().await?;
 
                 let packages_text = decode_reader(packages_compressed.bytes().await?.to_vec())?;
 
