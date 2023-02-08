@@ -4,6 +4,7 @@ use futures_util::StreamExt;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::cmp::min;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::Read;
 use std::io::Write;
@@ -92,7 +93,7 @@ async fn conditional_download(
     Ok(())
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Package {
     pub name: String,
     pub version: String,
@@ -181,6 +182,8 @@ async fn main() -> Result<()> {
         "bullseye-backports",
     ];
 
+    let mut packages = HashSet::new();
+
     for dist in &dists {
         // TODO: store Release so it can be put into our mirror, but only after
         // all packages are downloaded. this isn't necessary if this tool is run
@@ -209,8 +212,6 @@ async fn main() -> Result<()> {
                 sha256_rows = line.starts_with("SHA256");
             }
         }
-
-        let mut mirror_channel_index = 0;
 
         for component in vec!["main", "contrib", "non-free", "main/debian-installer"] {
             for arch in vec!["amd64", "i386"] {
@@ -274,14 +275,7 @@ async fn main() -> Result<()> {
                     if line.starts_with("Package: ") {
                         // new package starting
                         if package.sha256.len() == 64 {
-                            mirror_channel_list[mirror_channel_index]
-                                .send(package)
-                                .await?;
-
-                            mirror_channel_index += 1;
-                            if mirror_channel_index >= mirror_channel_list.len() {
-                                mirror_channel_index = 0;
-                            }
+                            packages.insert(package);
                         }
 
                         package = Package::new();
@@ -305,6 +299,22 @@ async fn main() -> Result<()> {
                     }
                 }
             }
+        }
+    }
+
+    // all packages are gathered (and deduplicated in the set) before
+    // downloading to avoid different tasks clobbering the files if the same
+    // package is available in multiple dists + components
+    let mut mirror_channel_index = 0;
+
+    for package in packages {
+        mirror_channel_list[mirror_channel_index]
+            .send(package)
+            .await?;
+
+        mirror_channel_index += 1;
+        if mirror_channel_index >= mirror_channel_list.len() {
+            mirror_channel_index = 0;
         }
     }
 
