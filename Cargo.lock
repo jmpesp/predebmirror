@@ -649,6 +649,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "26f6a7b87c2e435a3241addceeeff740ff8b7e76b74c13bf9acb17fa454ea00b"
 
 [[package]]
+name = "predebmirror"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "flate2",
+ "futures-util",
+ "indicatif",
+ "reqwest",
+ "sha256",
+ "tokio",
+ "xz",
+]
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.51"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -721,20 +735,6 @@ dependencies = [
  "wasm-streams",
  "web-sys",
  "winreg",
-]
-
-[[package]]
-name = "predebmirror"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "flate2",
- "futures-util",
- "indicatif",
- "reqwest",
- "sha256",
- "tokio",
- "xz",
 ]
 
 [[package]]
