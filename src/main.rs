@@ -75,6 +75,13 @@ async fn conditional_download(
         if meta.len() != bytes {
             download_file(&pb, &client, &name, &version, &url, &path).await?;
         } else {
+            // Uncomment this if you want predebmirror to check SHA256
+            // checksums. Note that debmirror does not do this by default
+            // "because it is too paranoid, and too slow."
+            //
+            // https://manpages.debian.org/bullseye/debmirror/debmirror.1.en.html
+
+            /*
             pb.set_style(ProgressStyle::default_bar().template("{msg}")?);
             pb.set_message(format!("checking SHA256 for {}", path));
 
@@ -84,6 +91,7 @@ async fn conditional_download(
             } else {
                 pb.set_message(format!("ok SHA256 for {}", path));
             }
+            */
         }
     } else {
         std::fs::create_dir_all(Path::new(&path).parent().unwrap())?;
