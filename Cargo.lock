@@ -724,7 +724,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rust-debmirror"
+name = "predebmirror"
 version = "0.1.0"
 dependencies = [
  "anyhow",
